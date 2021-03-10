@@ -484,6 +484,7 @@ CAboutDlg::CAboutDlg ( QWidget* parent ) : CBaseDlg ( parent )
         "<p>DonC (<a href=\"https://github.com/dcorson-ticino-com\">dcorson</a>)</p>"
         "<p>David Kastrup (<a href=\"https://github.com/dakhubgit\">dakhubgit</a>)</p>"
         "<p>Jordan Lum (<a href=\"https://github.com/mulyaj\">mulyaj</a>)</p>"
+        "<p>Noam Postavsky (<a href=\"https://github.com/npostavs\">npostavs</a>)</p>"
         "<br>" + tr ( "For details on the contributions check out the " ) +
         "<a href=\"https://github.com/jamulussoftware/jamulus/graphs/contributors\">" + tr ( "Github Contributors list" ) + "</a>." );
 
@@ -493,6 +494,7 @@ CAboutDlg::CAboutDlg ( QWidget* parent ) : CBaseDlg ( parent )
         "<p>Daryl Hanlon (<a href=\"https://github.com/ignotus666\">ignotus666</a>)</p>"
         "<p><b>" + tr ( "French" ) + "</b></p>"
         "<p>Olivier Humbert (<a href=\"https://github.com/trebmuh\">trebmuh</a>)</p>"
+        "<p>Julien Taverna (<a href=\"https://github.com/jujudusud\">jujudusud</a>)</p>"
         "<p><b>" + tr ( "Portuguese" ) + "</b></p>"
         "<p>Miguel de Matos (<a href=\"https://github.com/Snayler\">Snayler</a>)</p>"
         "<p>Melcon Moraes (<a href=\"https://github.com/melcon\">melcon</a>)</p>"
@@ -502,6 +504,7 @@ CAboutDlg::CAboutDlg ( QWidget* parent ) : CBaseDlg ( parent )
         "<p>Giuseppe Sapienza (<a href=\"https://github.com/dzpex\">dzpex</a>)</p>"
         "<p><b>" + tr ( "German" ) + "</b></p>"
         "<p>Volker Fischer (<a href=\"https://github.com/corrados\">corrados</a>)</p>"
+        "<p>Roland Moschel (<a href=\"https://github.com/rolamos\">rolamos</a>)</p>"
         "<p><b>" + tr ( "Polish" ) + "</b></p>"
         "<p>Martyna Danysz (<a href=\"https://github.com/Martyna27\">Martyna27</a>)</p>"
         "<p>Tomasz Bojczuk (<a href=\"https://github.com/SeeLook\">SeeLook</a>)</p>"
@@ -1024,7 +1027,10 @@ bool NetworkUtil::ParseNetworkAddress ( QString       strAddress,
 
 CHostAddress NetworkUtil::GetLocalAddress()
 {
-    QTcpSocket socket;
+    QUdpSocket socket;
+    // As we are using UDP, the connectToHost() does not generate any traffic at all.
+    // We just require a socket which is pointed towards the Internet in
+    // order to find out the IP of our own external interface:
     socket.connectToHost ( WELL_KNOWN_HOST, WELL_KNOWN_PORT );
 
     if ( socket.waitForConnected ( IP_LOOKUP_TIMEOUT ) )
