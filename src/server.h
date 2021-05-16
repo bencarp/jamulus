@@ -1,5 +1,5 @@
 /******************************************************************************\
- * Copyright (c) 2004-2020
+ * Copyright (c) 2004-2021
  *
  * Author(s):
  *  Volker Fischer
@@ -30,7 +30,6 @@
 #include <QHostAddress>
 #include <QFileInfo>
 #include <QtConcurrent>
-#include <QFutureSynchronizer>
 #include <algorithm>
 #ifdef USE_OPUS_SHARED_LIB
 # include "opus/opus_custom.h"
@@ -46,6 +45,8 @@
 #include "serverlogging.h"
 #include "serverlist.h"
 #include "recorder/jamcontroller.h"
+
+#include "threadpool.h"
 
 /* Definitions ****************************************************************/
 // no valid channel number
@@ -171,7 +172,9 @@ class CServer :
 public:
     CServer ( const int          iNewMaxNumChan,
               const QString&     strLoggingFileName,
+              const QString&     strServerBindIP,
               const quint16      iPortNumber,
+              const quint16      iQosNumber,
               const QString&     strHTMLStatusFileName,
               const QString&     strCentralServer,
               const QString&     strServerInfo,
@@ -183,6 +186,7 @@ public:
               const bool         bNUseDoubleSystemFrameSize,
               const bool         bNUseMultithreading,
               const bool         bDisableRecording,
+              const bool         bNDelayPan,
               const ELicenceType eNLicenceType );
 
     virtual ~CServer();
@@ -221,6 +225,9 @@ public:
 
     void CreateAndSendRecorderStateForAllConChannels();
 
+    // delay panning
+    void SetEnableDelayPanning ( bool bDelayPanningOn ) { bDelayPan = bDelayPanningOn; }
+    bool IsDelayPanningEnabled() { return bDelayPan; }
 
     // Server list management --------------------------------------------------
     void UpdateServerList() { ServerListManager.Update(); }
@@ -270,6 +277,9 @@ public:
     void SetAutoRunMinimized ( const bool NAuRuMin ) { bAutoRunMinimized = NAuRuMin; }
     bool GetAutoRunMinimized() { return bAutoRunMinimized; }
 
+    int GetClientNumAudioChannels ( const int iChanNum )
+        { return vecChannels[iChanNum].GetNumAudioChannels(); }
+
 protected:
     // access functions for actual channels
     bool IsConnected ( const int iChanNum ) { return vecChannels[iChanNum].IsConnected(); }
@@ -299,14 +309,17 @@ protected:
     inline void connectChannelSignalsToServerSlots();
 
     void WriteHTMLChannelList();
+    void WriteHTMLServerQuit();
 
-    void DecodeReceiveDataBlocks ( const int iStartChanCnt,
-                                   const int iStopChanCnt,
-                                   const int iNumClients );
+    static void DecodeReceiveDataBlocks ( CServer* pServer,
+                                          const int iStartChanCnt,
+                                          const int iStopChanCnt,
+                                          const int iNumClients );
 
-    void MixEncodeTransmitDataBlocks ( const int iStartChanCnt,
-                                       const int iStopChanCnt,
-                                       const int iNumClients );
+    static void MixEncodeTransmitDataBlocks ( CServer* pServer,
+                                              const int iStartChanCnt,
+                                              const int iStopChanCnt,
+                                              const int iNumClients );
 
     void DecodeReceiveData ( const int iChanCnt,
                              const int iNumClients );
@@ -317,89 +330,96 @@ protected:
     virtual void customEvent ( QEvent* pEvent );
 
     // if server mode is normal or double system frame size
-    bool                       bUseDoubleSystemFrameSize;
-    int                        iServerFrameSizeSamples;
+    bool                         bUseDoubleSystemFrameSize;
+    int                          iServerFrameSizeSamples;
 
     // variables needed for multithreading support
-    bool                      bUseMultithreading;
-    QFutureSynchronizer<void> FutureSynchronizer;
+    bool                         bUseMultithreading;
+    int                          iMaxNumThreads;
+    CVector< std::future<void> > Futures;
 
-    bool CreateLevelsForAllConChannels  ( const int                        iNumClients,
-                                          const CVector<int>&              vecNumAudioChannels,
-                                          const CVector<CVector<int16_t> > vecvecsData,
-                                          CVector<uint16_t>&               vecLevelsOut );
+    bool CreateLevelsForAllConChannels  ( const int                         iNumClients,
+                                          const CVector<int>&               vecNumAudioChannels,
+                                          const CVector< CVector<int16_t> > vecvecsData,
+                                          CVector<uint16_t>&                vecLevelsOut );
 
     // do not use the vector class since CChannel does not have appropriate
     // copy constructor/operator
-    CChannel                   vecChannels[MAX_NUM_CHANNELS];
-    int                        iMaxNumChannels;
-    CProtocol                  ConnLessProtocol;
-    QMutex                     Mutex;
-    QMutex                     MutexWelcomeMessage;
-    bool                       bChannelIsNowDisconnected;
+    CChannel                     vecChannels[MAX_NUM_CHANNELS];
+    int                          iMaxNumChannels;
+    CProtocol                    ConnLessProtocol;
+    QMutex                       Mutex;
+    QMutex                       MutexWelcomeMessage;
+    bool                         bChannelIsNowDisconnected;
 
     // audio encoder/decoder
-    OpusCustomMode*            Opus64Mode[MAX_NUM_CHANNELS];
-    OpusCustomEncoder*         Opus64EncoderMono[MAX_NUM_CHANNELS];
-    OpusCustomDecoder*         Opus64DecoderMono[MAX_NUM_CHANNELS];
-    OpusCustomEncoder*         Opus64EncoderStereo[MAX_NUM_CHANNELS];
-    OpusCustomDecoder*         Opus64DecoderStereo[MAX_NUM_CHANNELS];
-    OpusCustomMode*            OpusMode[MAX_NUM_CHANNELS];
-    OpusCustomEncoder*         OpusEncoderMono[MAX_NUM_CHANNELS];
-    OpusCustomDecoder*         OpusDecoderMono[MAX_NUM_CHANNELS];
-    OpusCustomEncoder*         OpusEncoderStereo[MAX_NUM_CHANNELS];
-    OpusCustomDecoder*         OpusDecoderStereo[MAX_NUM_CHANNELS];
-    CConvBuf<int16_t>          DoubleFrameSizeConvBufIn[MAX_NUM_CHANNELS];
-    CConvBuf<int16_t>          DoubleFrameSizeConvBufOut[MAX_NUM_CHANNELS];
+    OpusCustomMode*              Opus64Mode[MAX_NUM_CHANNELS];
+    OpusCustomEncoder*           Opus64EncoderMono[MAX_NUM_CHANNELS];
+    OpusCustomDecoder*           Opus64DecoderMono[MAX_NUM_CHANNELS];
+    OpusCustomEncoder*           Opus64EncoderStereo[MAX_NUM_CHANNELS];
+    OpusCustomDecoder*           Opus64DecoderStereo[MAX_NUM_CHANNELS];
+    OpusCustomMode*              OpusMode[MAX_NUM_CHANNELS];
+    OpusCustomEncoder*           OpusEncoderMono[MAX_NUM_CHANNELS];
+    OpusCustomDecoder*           OpusDecoderMono[MAX_NUM_CHANNELS];
+    OpusCustomEncoder*           OpusEncoderStereo[MAX_NUM_CHANNELS];
+    OpusCustomDecoder*           OpusDecoderStereo[MAX_NUM_CHANNELS];
+    CConvBuf<int16_t>            DoubleFrameSizeConvBufIn[MAX_NUM_CHANNELS];
+    CConvBuf<int16_t>            DoubleFrameSizeConvBufOut[MAX_NUM_CHANNELS];
 
-    CVector<QString>           vstrChatColors;
-    CVector<int>               vecChanIDsCurConChan;
+    CVector<QString>             vstrChatColors;
+    CVector<int>                 vecChanIDsCurConChan;
 
-    CVector<CVector<float> >   vecvecfGains;
-    CVector<CVector<float> >   vecvecfPannings;
-    CVector<CVector<int16_t> > vecvecsData;
-    CVector<int>               vecNumAudioChannels;
-    CVector<int>               vecNumFrameSizeConvBlocks;
-    CVector<int>               vecUseDoubleSysFraSizeConvBuf;
-    CVector<EAudComprType>     vecAudioComprType;
-    CVector<CVector<int16_t> > vecvecsSendData;
-    CVector<CVector<float> >   vecvecfIntermediateProcBuf;
-    CVector<CVector<uint8_t> > vecvecbyCodedData;
+    CVector< CVector<float> >    vecvecfGains;
+    CVector< CVector<float> >    vecvecfPannings;
+    CVector< CVector<int16_t> >  vecvecsData;
+    CVector< CVector<int16_t> >  vecvecsData2;
+    CVector<int>                 vecNumAudioChannels;
+    CVector<int>                 vecNumFrameSizeConvBlocks;
+    CVector<int>                 vecUseDoubleSysFraSizeConvBuf;
+    CVector<EAudComprType>       vecAudioComprType;
+    CVector< CVector<int16_t> >  vecvecsSendData;
+    CVector< CVector<float> >    vecvecfIntermediateProcBuf;
+    CVector< CVector<uint8_t> >  vecvecbyCodedData;
 
     // Channel levels
-    CVector<uint16_t>          vecChannelLevels;
+    CVector<uint16_t>            vecChannelLevels;
 
     // actual working objects
-    CHighPrioSocket            Socket;
+    CHighPrioSocket              Socket;
 
     // logging
-    CServerLogging             Logging;
+    CServerLogging               Logging;
 
     // channel level update frame interval counter
-    int                        iFrameCount;
+    int                          iFrameCount;
 
     // HTML file server status
-    bool                       bWriteStatusHTMLFile;
-    QString                    strServerHTMLFileListName;
+    bool                         bWriteStatusHTMLFile;
+    QString                      strServerHTMLFileListName;
 
-    CHighPrecisionTimer        HighPrecisionTimer;
+    CHighPrecisionTimer          HighPrecisionTimer;
 
     // server list
-    CServerListManager         ServerListManager;
+    CServerListManager           ServerListManager;
 
     // jam recorder
-    recorder::CJamController   JamController;
+    recorder::CJamController     JamController;
     bool bDisableRecording;
 
     // GUI settings
-    bool                       bAutoRunMinimized;
+    bool                         bAutoRunMinimized;
+
+    // for delay panning
+    bool                         bDelayPan;
 
     // messaging
-    QString                    strWelcomeMessage;
-    ELicenceType               eLicenceType;
-    bool                       bDisconnectAllClientsOnQuit;
+    QString                      strWelcomeMessage;
+    ELicenceType                 eLicenceType;
+    bool                         bDisconnectAllClientsOnQuit;
 
-    CSignalHandler*            pSignalHandler;
+    CSignalHandler*              pSignalHandler;
+
+    std::unique_ptr<CThreadPool> pThreadPool;
 
 signals:
     void Started();
@@ -457,7 +477,7 @@ public slots:
     void OnCLSendEmptyMes ( CHostAddress TargetInetAddr )
     {
         // only send empty message if server list is enabled and this is not
-        // the central server
+        // a directory server
         if ( ServerListManager.GetEnabled() &&
              !ServerListManager.GetIsCentralServer() )
         {

@@ -29,6 +29,7 @@
 #include <QHostAddress>
 #include <QHostInfo>
 #ifndef HEADLESS
+# include <QMessageBox>
 # include <QMenu>
 # include <QWhatsThis>
 # include <QTextBrowser>
@@ -53,7 +54,7 @@
 #include "global.h"
 #ifdef _WIN32
 # include <winsock2.h>
-# include <ws2ipdef.h>
+# include <ws2tcpip.h>
 # include <windows.h>
 # include <mmsystem.h>
 #elif defined ( __APPLE__ ) || defined ( __MACOSX )
@@ -100,6 +101,7 @@ inline int CalcBitRateBitsPerSecFromCodedBytes ( const int iCeltNumCodedBytes,
 }
 
 QString GetVersionAndNameStr ( const bool bWithHtml = true );
+QString MakeClientNameTitle ( QString win, QString client );
 
 
 /******************************************************************************\
@@ -422,35 +424,6 @@ public slots:
 };
 
 
-// Musician profile dialog -----------------------------------------------------
-class CMusProfDlg : public CBaseDlg
-{
-    Q_OBJECT
-
-public:
-    CMusProfDlg ( CClient* pNCliP,
-                  QWidget* parent = nullptr );
-
-protected:
-    virtual void showEvent ( QShowEvent* );
-
-    QLineEdit* pedtAlias;
-    QComboBox* pcbxInstrument;
-    QComboBox* pcbxCountry;
-    QLineEdit* pedtCity;
-    QComboBox* pcbxSkill;
-
-    CClient* pClient;
-
-public slots:
-    void OnAliasTextChanged ( const QString& strNewName );
-    void OnInstrumentActivated ( int iCntryListItem );
-    void OnCountryActivated ( int iCntryListItem );
-    void OnCityTextChanged ( const QString& strNewName );
-    void OnSkillActivated ( int iCntryListItem );
-};
-
-
 // Help menu -------------------------------------------------------------------
 class CHelpMenu : public QMenu
 {
@@ -465,6 +438,7 @@ protected:
 public slots:
     void OnHelpWhatsThis()        { QWhatsThis::enterWhatsThisMode(); }
     void OnHelpAbout()            { AboutDlg.exec(); }
+    void OnHelpAboutQt()          { QMessageBox::aboutQt(this, QString("About Qt")); }
     void OnHelpClientGetStarted() { QDesktopServices::openUrl ( QUrl ( CLIENT_GETTING_STARTED_URL ) ); }
     void OnHelpServerGetStarted() { QDesktopServices::openUrl ( QUrl ( SERVER_GETTING_STARTED_URL ) ); }
     void OnHelpSoftwareMan()      { QDesktopServices::openUrl ( QUrl ( SOFTWARE_MANUAL_URL ) ); }
@@ -588,7 +562,7 @@ enum EChSortType
 };
 
 
-// Central server address type -------------------------------------------------
+// Directory server address type -----------------------------------------------
 enum ECSAddType
 {
     // used for settings -> enum values should be fixed
@@ -670,7 +644,7 @@ inline QString svrRegStatusToString ( ESvrRegStatus eSvrRegStatus )
         return QCoreApplication::translate ( "CServerDlg", "Registered" );
 
     case SRS_CENTRAL_SVR_FULL:
-        return QCoreApplication::translate ( "CServerDlg", "Central Server full" );
+        return QCoreApplication::translate ( "CServerDlg", "Directory Server full" );
 
     case SRS_VERSION_TOO_OLD:
         return QCoreApplication::translate ( "CServerDlg", "Your server version is too old" );
@@ -683,7 +657,7 @@ inline QString svrRegStatusToString ( ESvrRegStatus eSvrRegStatus )
 }
 
 
-// Central server registration outcome -----------------------------------------
+// Directory server registration outcome ---------------------------------------
 enum ESvrRegResult
 {
     // used for protocol -> enum values must be fixed!
@@ -949,18 +923,14 @@ class CChannelInfo : public CChannelCoreInfo
 {
 public:
     CChannelInfo() :
-        iChanID ( 0 ),
-        iIpAddr ( 0 ) {}
+        iChanID ( 0 ) {}
 
     CChannelInfo ( const int               NiID,
-                   const quint32           NiIP,
                    const CChannelCoreInfo& NCorInf ) :
         CChannelCoreInfo ( NCorInf ),
-        iChanID ( NiID ),
-        iIpAddr ( NiIP ) {}
+        iChanID ( NiID ) {}
 
     CChannelInfo ( const int               NiID,
-                   const quint32           NiIP,
                    const QString           NsName,
                    const QLocale::Country& NeCountry,
                    const QString&          NsCity,
@@ -971,14 +941,10 @@ public:
                            NsCity,
                            NiInstrument,
                            NeSkillLevel ),
-        iChanID ( NiID ),
-        iIpAddr ( NiIP ) {}
+        iChanID ( NiID ) {}
 
     // ID of the channel
     int     iChanID;
-
-    // IP address of the channel
-    quint32 iIpAddr;
 };
 
 
@@ -1281,7 +1247,8 @@ public:
         }
         else
         {
-            return powf ( 10.0f, ( fInValueRange0_1 * 35.0f - 35.0f ) / 20.0f );
+            return powf ( 10.0f, ( fInValueRange0_1 - 1.0f ) *
+                AUD_MIX_FADER_RANGE_DB / 20.0f );
         }
     }
 };
